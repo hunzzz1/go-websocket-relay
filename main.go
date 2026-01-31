@@ -165,6 +165,11 @@ type WSMessage struct {
 	Data  interface{} `json:"data"`
 }
 
+type PingMessage struct {
+	Type string `json:"type"`
+	Ts   int64  `json:"ts"`
+}
+
 type IdentifyData struct {
 	Token string `json:"token"`
 }
@@ -331,10 +336,25 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	for {
-		var msg WSMessage
-		if err := conn.ReadJSON(&msg); err != nil {
+		_, raw, err := conn.ReadMessage()
+		if err != nil {
 			log.Println("⚠️ WebSocket read error:", err)
 			break
+		}
+
+		var pingMsg PingMessage
+		if err := json.Unmarshal(raw, &pingMsg); err == nil && pingMsg.Type == "ping" {
+			if err := conn.WriteJSON(PingMessage{Type: "pong", Ts: pingMsg.Ts}); err != nil {
+				log.Println("⚠️ WebSocket pong error:", err)
+				break
+			}
+			continue
+		}
+
+		var msg WSMessage
+		if err := json.Unmarshal(raw, &msg); err != nil {
+			log.Println("⚠️ WebSocket message parse error:", err)
+			continue
 		}
 
 		switch msg.Event {

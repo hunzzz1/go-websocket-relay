@@ -1,9 +1,5 @@
 # Go WebSocket Relay Server
 
-> 🇨🇳 中文说明在前，🇺🇸 English description follows below.
-
-## 🇨🇳 中文说明
-
 一个用 Go 编写的**极简 WebSocket 中继服务**，基于 Gorilla/WebSocket 实现。
 
 主要用途：
@@ -169,6 +165,25 @@ ws://localhost:3000/ws?token=USER_123
 
 ---
 
+#### 3. 延迟（RTT）测试
+
+客户端发送：
+
+```json
+{"type":"ping","ts":1738288000123}
+```
+
+服务端原样回传：
+
+```json
+{"type":"pong","ts":1738288000123}
+```
+
+- `ts` 为毫秒时间戳  
+- 服务端不做单位转换，原样回传
+
+---
+
 ### HTTP 推送接口
 
 #### 接口路径
@@ -295,243 +310,3 @@ curl -X POST "http://localhost:3000/api/push"   -H "Content-Type: application/js
   - 上层负载均衡（例如：一个独立网关转发到多个 relay 实例）
 
 ---
-
-## 🇺🇸 English Description
-
-A minimal WebSocket relay service written in Go, using Gorilla/WebSocket.
-
-It is designed as a small standalone component that:
-
-- Accepts WebSocket connections from clients
-- Groups connections by a logical user identifier (token)
-- Exposes an HTTP API to push messages to a single user or broadcast to all
-- Optionally delays message delivery by a given number of seconds
-- Uses a simple `config.json` + environment variables for configuration
-
-### Features
-
-- WebSocket server with connection tracking
-- Grouping by user token (multiple connections per token)
-- HTTP push endpoint for single-user or broadcast messages
-- API Key based authentication for push requests
-- Optional delayed push via `delay_seconds`
-- `/health` endpoint for health checks
-- Customizable paths:
-  - WebSocket path (`ws_path`)
-  - Push API path (`push_path`)
-
----
-
-### Configuration
-
-On startup the server:
-
-1. Reads environment variables as defaults:
-   - `PORT`          (default: `"3000"`)
-   - `RELAY_API_KEY` (default: `"U2FsdGVkX18ucQzBA+ozhc3ySrVZ"`)
-   - `WS_PATH`       (default: `"/ws"`)
-   - `PUSH_PATH`     (default: `"/api/push"`)
-2. Tries to load `config.json` from the current working directory
-3. If `config.json` does not exist or is invalid:
-   - Uses default values
-   - Writes a new `config.json`
-4. Ensures `port`, `ws_path`, `api_key`, and `push_path` are not empty
-
-Example `config.json`:
-
-```json
-{
-  "port": "3000",
-  "api_key": "change_me_to_a_secure_key",
-  "ws_path": "/ws",
-  "push_path": "/api/push"
-}
-```
-
-> In production, you should change `api_key` to a strong random value.
-
----
-
-### Running
-
-Simple run:
-
-```bash
-go run main.go
-```
-
-With explicit environment variables:
-
-```bash
-PORT=3000 RELAY_API_KEY="your_api_key_here" WS_PATH="/ws" PUSH_PATH="/api/push" go run main.go
-```
-
-On success you should see logs similar to:
-
-```text
-Go Relay server listening on http://localhost:3000
-WebSocket path = /ws
-Push API path = /api/push
-```
-
----
-
-### WebSocket Usage
-
-#### 1. Connect
-
-Default WebSocket URL:
-
-```text
-ws://localhost:3000/ws
-```
-
-You can pass a token in the query string, which will be used as the user identifier:
-
-```text
-ws://localhost:3000/ws?token=USER_123
-```
-
-#### 2. Identify via message (optional)
-
-Clients can also send an `identify` event after connecting:
-
-```json
-{
-  "event": "identify",
-  "data": {
-    "token": "USER_123"
-  }
-}
-```
-
-The server then associates that connection with the token.  
-Multiple connections can share the same token (e.g. multiple devices of the same user).
-
----
-
-### Push API
-
-#### Path
-
-- Default: `/api/push`
-- Can be customized via:
-  - `push_path` in `config.json`
-  - or `PUSH_PATH` environment variable
-
-#### Authentication
-
-The API Key is required and can be provided in any of these:
-
-- `X-API-KEY` header
-- `API-KEY` header
-- `?api_key=` query parameter
-
-If the key is missing or invalid, the server returns:
-
-```json
-{
-  "code": -1,
-  "msg": "invalid api key"
-}
-```
-
-#### Request Body
-
-```json
-{
-  "event_name": "eventName",
-  "subject": { "any": "payload" },
-  "delay_seconds": 0,
-  "token": "USER_123"
-}
-```
-
-Field meanings:
-
-- `event_name` (string, required): Event name forwarded to WebSocket clients
-- `subject` (any, required): Arbitrary payload delivered as `data.subject`
-- `delay_seconds` (int, optional): Delay in seconds before sending (`<= 0` means send immediately)
-- `token` (any, optional): Determines the target user; if missing or invalid → broadcast
-
-The `token` is converted to a user ID using the following rules:
-
-- Number → string (e.g. `123` → `"123"`)
-- String → as-is
-- Object → uses `id` or `user_id` field if present
-- `null` or cannot be resolved → treated as broadcast
-
-#### Example: push to a single user
-
-```bash
-curl -X POST "http://localhost:3000/api/push"   -H "Content-Type: application/json"   -H "X-API-KEY: your_api_key_here"   -d '{
-    "event_name": "userMessage",
-    "subject": { "text": "hello" },
-    "delay_seconds": 0,
-    "token": "USER_123"
-  }'
-```
-
-#### Example: broadcast to all
-
-```bash
-curl -X POST "http://localhost:3000/api/push"   -H "Content-Type: application/json"   -H "X-API-KEY: your_api_key_here"   -d '{
-    "event_name": "broadcast",
-    "subject": { "text": "hello everyone" },
-    "delay_seconds": 0
-  }'
-```
-
----
-
-### Message Format to WebSocket Clients
-
-Clients receive messages in the following structure:
-
-```json
-{
-  "event": "eventName",
-  "data": {
-    "subject": { "any": "payload" },
-    "ts": 1733890000000,
-    "token": "USER_123"
-  }
-}
-```
-
-- `event`  : Same as `event_name` from the HTTP API
-- `subject`: Original `subject` payload
-- `ts`     : Server-side timestamp (milliseconds since epoch)
-- `token`  : Original `token` value from the push request (if any)
-
----
-
-### Health Check
-
-A simple endpoint is provided:
-
-- Path: `/health`
-- Method: `GET`
-
-Example response:
-
-```json
-{
-  "status": "ok"
-}
-```
-
-This can be used for monitoring and readiness checks.
-
----
-
-### Production Notes
-
-- Change the default `api_key` before going to production.
-- Prefer running behind a reverse proxy (e.g. Nginx / Caddy) and use TLS (`wss://`).
-- For higher connection counts, tune:
-  - `ulimit -n` (file descriptor limits)
-  - OS-level TCP settings (`sysctl`)
-- For horizontal scaling, consider:
-  - A message bus (e.g. Redis Pub/Sub) to fan out events
-  - A separate gateway or load balancer in front of multiple relay instances.
